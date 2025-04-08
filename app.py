@@ -2,18 +2,15 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
+import plotly.express as px
 
 st.set_page_config(page_title="项目甘特图", layout="wide")
 st.title("项目进度甘特图")
 
-# Define colors for different categories
-TASK_COLORS = {
-    '望春': '#1f77b4',    # Blue
-    '新厂房': '#2ca02c',  # Green
-    'RFID跟踪': '#ff7f0e' # Orange
-}
-
-MILESTONE_COLOR = '#d62728'  # Red for all milestones
+def get_color_palette(n_colors):
+    """Generate a color palette for the given number of resources"""
+    colors = px.colors.qualitative.Set3[:n_colors]
+    return colors
 
 def create_gantt_chart(df):
     fig = go.Figure()
@@ -22,49 +19,54 @@ def create_gantt_chart(df):
     df['工作序号'] = pd.to_numeric(df['工作序号'])
     df = df.sort_values('工作序号')
     
-    # Process each resource's tasks and milestones
-    for resource in df['负责人'].unique():
-        resource_df = df[df['负责人'] == resource]
+    # Get unique resources and assign colors
+    resources = df['负责人'].unique()
+    colors = get_color_palette(len(resources))
+    resource_colors = dict(zip(resources, colors))
+    
+    # Process all items in sequence
+    for _, row in df.iterrows():
+        is_milestone = row['备注'] == 'Milestones'
+        resource = row['负责人']
+        color = resource_colors[resource]
         
-        # Add tasks
-        tasks = resource_df[resource_df['备注'] == 'Task']
-        if not tasks.empty:
+        if is_milestone:
+            # Add milestone
+            fig.add_trace(go.Scatter(
+                x=[row['结束时间']],
+                y=[f"{row['工作序号']}. {row['工作步骤']}"],
+                mode='markers',
+                name=resource,
+                marker=dict(
+                    symbol='diamond',
+                    size=16,
+                    color='#d62728',  # Red for milestones
+                    line=dict(color=color, width=2)
+                ),
+                showlegend=True,
+                legendgroup=resource,
+                hovertemplate=(
+                    "里程碑: %{y}<br>" +
+                    "日期: %{x|%Y-%m-%d}<br>" +
+                    f"负责人: {resource}<br>" +
+                    "<extra></extra>"
+                )
+            ))
+        else:
+            # Add task
             fig.add_trace(go.Bar(
-                base=tasks['开始时间'],
-                x=[(end - start).total_seconds() * 1000 for start, end in zip(tasks['开始时间'], tasks['结束时间'])],
-                y=[f"{row['工作序号']}. {row['工作步骤']}" for _, row in tasks.iterrows()],
+                base=[row['开始时间']],
+                x=[(row['结束时间'] - row['开始时间']).total_seconds() * 1000],
+                y=[f"{row['工作序号']}. {row['工作步骤']}"],
                 orientation='h',
                 name=resource,
-                marker_color=TASK_COLORS.get(resource, '#7f7f7f'),
+                marker_color=color,
                 showlegend=True,
                 legendgroup=resource,
                 hovertemplate=(
                     "任务: %{y}<br>" +
                     "开始: %{base|%Y-%m-%d}<br>" +
                     "结束: %{x}<br>" +
-                    f"负责人: {resource}<br>" +
-                    "<extra></extra>"
-                )
-            ))
-        
-        # Add milestones for this resource
-        milestones = resource_df[resource_df['备注'] == 'Milestones']
-        if not milestones.empty:
-            fig.add_trace(go.Scatter(
-                x=milestones['结束时间'],
-                y=[f"{row['工作序号']}. {row['工作步骤']}" for _, row in milestones.iterrows()],
-                mode='markers',
-                name=resource,
-                marker=dict(
-                    symbol='diamond',
-                    size=16,
-                    color=MILESTONE_COLOR,
-                    line=dict(color=TASK_COLORS.get(resource, '#7f7f7f'), width=2)
-                ),
-                showlegend=False,
-                hovertemplate=(
-                    "里程碑: %{y}<br>" +
-                    "日期: %{x|%Y-%m-%d}<br>" +
                     f"负责人: {resource}<br>" +
                     "<extra></extra>"
                 )
@@ -96,9 +98,16 @@ def create_gantt_chart(df):
             y=1.02,
             xanchor="right",
             x=1,
-            orientation="h"
+            orientation="h",
+            traceorder="normal"
         )
     )
+    
+    # Group legend items
+    for trace in fig.data:
+        if trace.legendgroup:
+            if any(t.legendgroup == trace.legendgroup and t.name == trace.name for t in fig.data[:fig.data.index(trace)]):
+                trace.showlegend = False
     
     return fig
 
